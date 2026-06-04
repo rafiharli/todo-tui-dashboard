@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"time"
 	"todo-dashboard/internal/models"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -23,7 +24,8 @@ func NewDB(path string) (*DB, error) {
 		title TEXT NOT NULL,
 		priority INTEGER DEFAULT 0,
 		status BOOLEAN DEFAULT 0,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		due_date DATETIME
 	);`
 
 	_, err = db.Exec(schema)
@@ -31,16 +33,19 @@ func NewDB(path string) (*DB, error) {
 		return nil, err
 	}
 
+	// Migration: Add due_date column if it doesn't exist
+	_, _ = db.Exec("ALTER TABLE tasks ADD COLUMN due_date DATETIME")
+
 	return &DB{conn: db}, nil
 }
 
-func (d *DB) AddTask(title string, priority models.Priority) error {
-	_, err := d.conn.Exec("INSERT INTO tasks (title, priority) VALUES (?, ?)", title, int(priority))
+func (d *DB) AddTask(title string, priority models.Priority, dueDate *time.Time) error {
+	_, err := d.conn.Exec("INSERT INTO tasks (title, priority, due_date) VALUES (?, ?, ?)", title, int(priority), dueDate)
 	return err
 }
 
 func (d *DB) GetTasks() ([]models.Task, error) {
-	rows, err := d.conn.Query("SELECT id, title, priority, status, created_at FROM tasks ORDER BY status ASC, priority DESC, created_at DESC")
+	rows, err := d.conn.Query("SELECT id, title, priority, status, created_at, due_date FROM tasks ORDER BY status ASC, priority DESC, created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +55,7 @@ func (d *DB) GetTasks() ([]models.Task, error) {
 	for rows.Next() {
 		var t models.Task
 		var p int
-		err := rows.Scan(&t.ID, &t.Title, &p, &t.Status, &t.CreatedAt)
+		err := rows.Scan(&t.ID, &t.Title, &p, &t.Status, &t.CreatedAt, &t.DueDate)
 		if err != nil {
 			return nil, err
 		}

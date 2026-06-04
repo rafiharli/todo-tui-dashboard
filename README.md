@@ -7,6 +7,8 @@ A sophisticated, keyboard-centric Daily To-Do Dashboard built with **Go** and th
 ## ✨ Features
 
 - **Aesthetic Interface:** Styled with `lipgloss` for a modern, colorful terminal experience.
+- **Due Dates & Times:** Set deadlines for your tasks to stay on track.
+- **Overdue Alerts:** Visual indicators for tasks that have passed their deadline.
 - **Progress Tracking:** Real-time progress bar that visualizes your daily completion rate.
 - **Keyboard-Centric:** Vim-inspired navigation (`j/k`) and intuitive shortcuts.
 - **Persistent Storage:** Built-in SQLite integration to ensure your tasks are saved locally.
@@ -40,27 +42,30 @@ A sophisticated, keyboard-centric Daily To-Do Dashboard built with **Go** and th
    go mod tidy
    ```
 
-3. **Build the application:**
+3. **Run it!**
    ```bash
-   go build -o todo-cli main.go
-   ```
-
-4. **Run it!**
-   ```bash
-   ./todo-cli
+   go run main.go
    ```
 
 ## ⌨️ Keybindings
 
 | Key | Action |
 |-----|--------|
-| `n` | Add a new task |
+| `n` | Add a new task (Step 1: Title, Step 2: Optional Date) |
 | `Space` | Toggle task completion (Done/Todo) |
 | `↑/k` | Move cursor up |
 | `↓/j` | Move cursor down |
 | `x` | Delete selected task |
 | `q` / `Ctrl+C` | Quit application |
 | `Esc` | Cancel adding new task |
+| `Enter` | Confirm input |
+
+### Date Formats Supported
+When adding a task, you can use several formats for the due date:
+- `YYYY-MM-DD HH:MM` (e.g., `2026-06-05 14:00`)
+- `YYYY-MM-DD`
+- `DD-MM-YYYY`
+- `HH:MM` (Assumes today)
 
 ## 📁 Project Structure
 

@@ -20,4 +20,5 @@ type Task struct {
 	Priority  Priority
 	Status    bool // false = Todo, true = Done
 	CreatedAt time.Time
+	DueDate   *time.Time
 }

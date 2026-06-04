@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 	"todo-dashboard/internal/db"
 	"todo-dashboard/internal/models"
 
@@ -12,6 +13,21 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+)
+
+type tickMsg time.Time
+
+func tick() tea.Cmd {
+	return tea.Every(time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+type inputStep int
+
+const (
+	stepTitle inputStep = iota
+	stepDate
 )
 
 type keyMap struct {
@@ -71,6 +87,8 @@ type Model struct {
 	tasks       []models.Task
 	cursor      int
 	inputMode   bool
+	inputStep   inputStep
+	tempTitle   string
 	textInput   textinput.Model
 	progress    progress.Model
 	help        help.Model
@@ -78,6 +96,7 @@ type Model struct {
 	width       int
 	height      int
 	lastError   error
+	now         time.Time
 }
 
 func NewModel(database *db.DB) Model {
@@ -94,11 +113,12 @@ func NewModel(database *db.DB) Model {
 		textInput: ti,
 		progress:  p,
 		help:      help.New(),
+		now:       time.Now(),
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.fetchTasks()
+	return tea.Batch(m.fetchTasks(), tick())
 }
 
 func (m Model) fetchTasks() tea.Cmd {
@@ -115,6 +135,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tickMsg:
+		m.now = time.Time(msg)
+		return m, tick()
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -139,18 +163,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inputMode {
 			switch {
 			case key.Matches(msg, keys.Enter):
-				if m.textInput.Value() != "" {
-					err := m.db.AddTask(m.textInput.Value(), models.Medium)
+				if m.inputStep == stepTitle {
+					if m.textInput.Value() != "" {
+						m.tempTitle = m.textInput.Value()
+						m.textInput.SetValue("")
+						m.textInput.Placeholder = "Due date? (e.g. 2006-01-02 15:04 or leave empty)"
+						m.inputStep = stepDate
+						return m, nil
+					}
+				} else {
+					var dueDate *time.Time
+					dateVal := m.textInput.Value()
+					if dateVal != "" {
+						// Simple parsing logic
+						formats := []string{
+							"2006-01-02 15:04",
+							"2006-01-02",
+							"02-01-2006 15:04",
+							"02-01-2006",
+							"15:04",
+						}
+						for _, f := range formats {
+							t, err := time.ParseInLocation(f, dateVal, time.Local)
+							if err == nil {
+								// If only time was provided, assume today
+								if f == "15:04" {
+									now := time.Now()
+									t = time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, time.Local)
+								}
+								dueDate = &t
+								break
+							}
+						}
+						if dueDate == nil {
+							m.lastError = fmt.Errorf("invalid date format")
+							return m, nil
+						}
+					}
+
+					err := m.db.AddTask(m.tempTitle, models.Medium, dueDate)
 					if err != nil {
 						m.lastError = err
 					}
 					m.textInput.SetValue("")
+					m.textInput.Placeholder = "What needs to be done?"
 					m.inputMode = false
+					m.inputStep = stepTitle
+					m.lastError = nil
 					return m, m.fetchTasks()
 				}
 			case msg.Type == tea.KeyEsc:
 				m.inputMode = false
+				m.inputStep = stepTitle
 				m.textInput.SetValue("")
+				m.textInput.Placeholder = "What needs to be done?"
+				m.lastError = nil
 				return m, nil
 			}
 			m.textInput, cmd = m.textInput.Update(msg)
@@ -183,6 +250,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, keys.New):
 			m.inputMode = true
+			m.inputStep = stepTitle
 			m.textInput.Focus()
 			return m, nil
 
@@ -205,7 +273,20 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("#FAFAFA")).
 			Background(lipgloss.Color("#7D56F4")).
-			Padding(0, 1).
+			Padding(0, 1)
+
+	clockStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#7D56F4")).
+			Padding(0, 1)
+
+	dateStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888")).
+			Padding(0, 1)
+
+	headerStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#3C3C3C")).
 			MarginBottom(1)
 
 	docStyle = lipgloss.NewStyle().Margin(1, 2)
@@ -216,9 +297,18 @@ var (
 
 	todoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FAFAFA"))
 
+	dueStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Italic(true)
+	overdueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87")).Bold(true)
+
 	priorityHighStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87"))
 	priorityMedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FDFFAD"))
 	priorityLowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#87D787"))
+
+	boxStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#7D56F4")).
+			Padding(1, 2).
+			Width(60)
 )
 
 func (m Model) View() string {
@@ -228,8 +318,17 @@ func (m Model) View() string {
 
 	var s strings.Builder
 
-	s.WriteString(titleStyle.Render(" DAILY DASHBOARD "))
-	s.WriteString("\n\n")
+	// Header construction
+	headerTitle := titleStyle.Render(" DAILY DASHBOARD ")
+	clockStr := clockStyle.Render(m.now.Format("15:04:05"))
+	dateStr := dateStyle.Render(m.now.Format("Monday, 02 Jan 2006"))
+
+	header := lipgloss.JoinHorizontal(lipgloss.Center, headerTitle, dateStr, clockStr)
+	s.WriteString(headerStyle.Width(m.width - 4).Render(header))
+	s.WriteString("\n")
+
+	// Main content in a box
+	var content strings.Builder
 
 	// Progress section
 	doneCount := 0
@@ -245,16 +344,24 @@ func (m Model) View() string {
 		pct = float64(doneCount) / float64(total)
 	}
 
-	s.WriteString(fmt.Sprintf("Progress: %d/%d tasks completed\n", doneCount, total))
-	s.WriteString(m.progress.ViewAs(pct))
-	s.WriteString("\n\n")
+	content.WriteString(fmt.Sprintf("Progress: %d/%d tasks completed\n", doneCount, total))
+	content.WriteString(m.progress.ViewAs(pct))
+	content.WriteString("\n\n")
 
 	// Task list
 	if m.inputMode {
-		s.WriteString("New Task: " + m.textInput.View() + "\n\n")
+		prompt := "TASK TITLE"
+		if m.inputStep == stepDate {
+			prompt = "DUE DATE (Optional)"
+		}
+		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true).Render(prompt) + "\n")
+		content.WriteString(m.textInput.View() + "\n\n")
+		if m.inputStep == stepDate {
+			content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("Formats: YYYY-MM-DD, HH:MM, or DD-MM-YYYY") + "\n")
+		}
 	} else {
 		if len(m.tasks) == 0 {
-			s.WriteString("No tasks yet. Press 'n' to add one.\n\n")
+			content.WriteString("No tasks yet. Press 'n' to add one.\n\n")
 		} else {
 			for i, task := range m.tasks {
 				cursor := " "
@@ -269,16 +376,35 @@ func (m Model) View() string {
 					taskTitle = doneStyle.Render(task.Title)
 				}
 
-				s.WriteString(fmt.Sprintf("%s %s %s\n", cursor, checked, taskTitle))
+				dueStr := ""
+				if task.DueDate != nil {
+					isOverdue := task.DueDate.Before(m.now) && !task.Status
+					style := dueStyle
+					if isOverdue {
+						style = overdueStyle
+					}
+					
+					// Nice formatting for due date
+					format := "02 Jan 15:04"
+					if task.DueDate.Year() != m.now.Year() {
+						format = "02 Jan 2006"
+					}
+					dueStr = style.Render(" (Due: " + task.DueDate.Format(format) + ")")
+				}
+
+				content.WriteString(fmt.Sprintf("%s %s %s%s\n", cursor, checked, taskTitle, dueStr))
 			}
-			s.WriteString("\n")
+			content.WriteString("\n")
 		}
 	}
 
 	if m.lastError != nil {
-		s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("Error: %v", m.lastError)))
-		s.WriteString("\n")
+		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("Error: %v", m.lastError)))
+		content.WriteString("\n")
 	}
+
+	s.WriteString(boxStyle.Width(m.width - 6).Render(content.String()))
+	s.WriteString("\n\n")
 
 	s.WriteString(m.help.View(keys))
 
