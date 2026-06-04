@@ -2,7 +2,7 @@
 
 A sophisticated, keyboard-centric Daily To-Do Dashboard built with **Go** and the **Charm (Bubble Tea)** ecosystem. Designed for developers who live in the terminal and want a fast, aesthetic way to manage their daily tasks.
 
-![TUI Preview](https://via.placeholder.com/800x400?text=Advanced+TUI+Todo+Dashboard+Preview) *(Tip: Replace this with a real screenshot/GIF!)*
+<img width="1175" height="581" alt="Screenshot 2026-06-04 150621" src="https://github.com/user-attachments/assets/b7f98835-4109-4636-9a67-70eee7475cb1" />
 
 ## ✨ Features
 
